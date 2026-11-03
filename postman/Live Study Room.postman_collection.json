@@ -1,0 +1,296 @@
+{
+  "info": {
+    "_postman_id": "b6f0f6a4-6a9e-4c2f-9c1a-7c5f0f2d9a11",
+    "name": "Live Study Room API",
+    "description": "Auth (short-lived access token + rotating refresh token cookie), rooms, and the socket handshake token.\n\nHow to use:\n1. Select the `Live Study Room - Local` environment.\n2. Run `Auth > Login` (or `Register`) once. The access token is saved to the collection variable automatically.\n3. The collection pre-request script silently refreshes an expired access token.\n\nThe refresh token lives in an httpOnly cookie, so Postman's cookie jar handles it. Keep **Send cookies** enabled and use the same host for every request.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{accessToken}}", "type": "string" }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const url = pm.request.url.toString();",
+          "if (/\\/(register|login|refresh)$/.test(url)) return;",
+          "",
+          "const baseUrl = pm.environment.get('baseUrl') || 'http://localhost:3000';",
+          "const accessToken = pm.collectionVariables.get('accessToken');",
+          "let expired = !accessToken;",
+          "if (accessToken) {",
+          "  try {",
+          "    const payload = JSON.parse(atob(accessToken.split('.')[1]));",
+          "    expired = !payload.exp || payload.exp * 1000 < Date.now() + 30000;",
+          "  } catch (e) {",
+          "    expired = true;",
+          "  }",
+          "}",
+          "if (!expired) return;",
+          "",
+          "pm.sendRequest({ url: `${baseUrl}/api/auth/refresh`, method: 'POST' }, (err, res) => {",
+          "  if (err || res.code !== 200) return;",
+          "  const data = res.json();",
+          "  pm.collectionVariables.set('accessToken', data.token);",
+          "  pm.collectionVariables.set('userId', data.user.id);",
+          "});"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "userId", "value": "", "type": "string" },
+    { "key": "roomId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (pm.response.code === 201) {",
+                  "  pm.collectionVariables.set('accessToken', data.token);",
+                  "  pm.collectionVariables.set('userId', data.user.id);",
+                  "}",
+                  "pm.test('Returns an access token', () => pm.expect(data.token).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{name}}\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "register"]
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('accessToken', data.token);",
+                  "  pm.collectionVariables.set('userId', data.user.id);",
+                  "}",
+                  "pm.test('Returns an access token', () => pm.expect(data.token).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Refresh",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('accessToken', data.token);",
+                  "  pm.collectionVariables.set('userId', data.user.id);",
+                  "}",
+                  "pm.test('Rotates the refresh cookie', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "refresh"]
+            }
+          }
+        },
+        {
+          "name": "Me",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.test('Returns the current user', () => pm.expect(data.user.id).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "me"]
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('accessToken', '');",
+                  "pm.collectionVariables.set('userId', '');",
+                  "pm.test('Revokes the session', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "logout"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rooms",
+      "item": [
+        {
+          "name": "List rooms",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.test('Returns a rooms array', () => pm.expect(data.rooms).to.be.an('array'));",
+                  "if (data.rooms && data.rooms.length) pm.collectionVariables.set('roomId', data.rooms[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "rooms"]
+            }
+          }
+        },
+        {
+          "name": "Create room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (pm.response.code === 201) pm.collectionVariables.set('roomId', data.room.id);",
+                  "pm.test('Creates a room', () => pm.expect(pm.response.code).to.eql(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Algorithms deep work\",\n  \"description\": \"Two hours of focused practice\",\n  \"subject\": \"Computer Science\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "rooms"]
+            }
+          }
+        },
+        {
+          "name": "Join room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.test('Joins the room', () => pm.expect(data.room.members).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/{{roomId}}/join",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "rooms", "{{roomId}}", "join"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
