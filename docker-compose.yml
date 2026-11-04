@@ -26,6 +26,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       MONGO_URI: mongodb://mongo:27017/live-study-room
+      UPLOADS_DIR: /app/uploads
       JWT_SECRET: ${JWT_SECRET:-development-secret}
       ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
       REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-30}
@@ -42,6 +43,8 @@ services:
       retries: 5
       start_period: 15s
     stop_grace_period: 15s
+    volumes:
+      - study-room-uploads:/app/uploads
 
   client:
     build:
@@ -64,3 +67,4 @@ services:
 
 volumes:
   study-room-data:
+  study-room-uploads:

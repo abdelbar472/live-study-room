@@ -2,13 +2,17 @@
   "info": {
     "_postman_id": "b6f0f6a4-6a9e-4c2f-9c1a-7c5f0f2d9a11",
     "name": "Live Study Room API",
-    "description": "Auth (short-lived access token + rotating refresh token cookie), rooms, and the socket handshake token.\n\nHow to use:\n1. Select the `Live Study Room - Local` environment.\n2. Run `Auth > Login` (or `Register`) once. The access token is saved to the collection variable automatically.\n3. The collection pre-request script silently refreshes an expired access token.\n\nThe refresh token lives in an httpOnly cookie, so Postman's cookie jar handles it. Keep **Send cookies** enabled and use the same host for every request.",
+    "description": "Single-file Postman collection for the Live Study Room API: auth, profiles, friends, invite-only rooms, join requests, attachments, and Socket.IO notes.\n\nHOW TO USE\n1. Import only this file. It carries its own variables, so no environment is required.\n2. baseUrl defaults to http://localhost:8080 (Docker/nginx). Use http://localhost:3000 only when the API runs directly via npm run dev.\n3. Run Setup first. It creates/logs in two demo users (A and B), saves both access tokens, and makes the rest of the collection runnable in one pass.\n4. Or run any folder/request on its own. Requests that act as user B already use {{accessTokenB}}; everything else uses the active {{accessToken}}.\n\nTWO USERS\n- A = active user (creates rooms, sends the first friend request, approves join requests).\n- B = second user (accepts the friend request, accepts invitations, asks to join).\n- Change nameA/emailA/passwordA or nameB/emailB/passwordB to use your own accounts.\n- Login A also fills {{accessToken}}; Login B fills {{accessTokenB}} and {{userIdB}}.\n\nROOM FLOWS\n- Public room: Create public room -> Join room (as B).\n- Invite-only: Create invite-only room -> Invite B -> List invitations (B) -> Accept invitation (B).\n- Ask to join: Create join room -> Ask to join (B) -> List requests (A) -> Accept (A).\n\nAUTH NOTES\n- Access tokens last 15 minutes. The pre-request script refreshes the active token when it is missing or about to expire.\n- The refresh token is an httpOnly cookie, so keep \"Send cookies\" enabled and use one host consistently (localhost vs 127.0.0.1 are different).\n- Refresh and Logout need that cookie. All other requests use the bearer token and work without it.\n\nSocket.IO cannot be exercised from Postman. The client sends the same access token as auth.token. Attachments are uploaded as a base64 data URL, then the returned URL is sent in chat:send.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
     "type": "bearer",
     "bearer": [
-      { "key": "token", "value": "{{accessToken}}", "type": "string" }
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
     ]
   },
   "event": [
@@ -17,25 +21,30 @@
       "script": {
         "type": "text/javascript",
         "exec": [
-          "const url = pm.request.url.toString();",
-          "if (/\\/(register|login|refresh)$/.test(url)) return;",
+          "var url = pm.request.url.toString();",
+          "if (/\\/(register|login|refresh|logout)$/.test(url)) return;",
           "",
-          "const baseUrl = pm.environment.get('baseUrl') || 'http://localhost:3000';",
-          "const accessToken = pm.collectionVariables.get('accessToken');",
-          "let expired = !accessToken;",
+          "var baseUrl = pm.collectionVariables.get('baseUrl') || 'http://localhost:8080';",
+          "var accessToken = pm.collectionVariables.get('accessToken');",
+          "var expired = !accessToken;",
           "if (accessToken) {",
           "  try {",
-          "    const payload = JSON.parse(atob(accessToken.split('.')[1]));",
+          "    var base64 = accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');",
+          "    while (base64.length % 4) base64 += '=';",
+          "    var json = typeof Buffer !== 'undefined'",
+          "      ? Buffer.from(base64, 'base64').toString('utf8')",
+          "      : atob(base64);",
+          "    var payload = JSON.parse(json);",
           "    expired = !payload.exp || payload.exp * 1000 < Date.now() + 30000;",
-          "  } catch (e) {",
+          "  } catch (error) {",
           "    expired = true;",
           "  }",
           "}",
           "if (!expired) return;",
           "",
-          "pm.sendRequest({ url: `${baseUrl}/api/auth/refresh`, method: 'POST' }, (err, res) => {",
-          "  if (err || res.code !== 200) return;",
-          "  const data = res.json();",
+          "pm.sendRequest({ url: baseUrl + '/api/auth/refresh', method: 'POST' }, function (error, response) {",
+          "  if (error || response.code !== 200) return;",
+          "  var data = response.json();",
           "  pm.collectionVariables.set('accessToken', data.token);",
           "  pm.collectionVariables.set('userId', data.user.id);",
           "});"
@@ -44,126 +53,420 @@
     }
   ],
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
-    { "key": "accessToken", "value": "", "type": "string" },
-    { "key": "userId", "value": "", "type": "string" },
-    { "key": "roomId", "value": "", "type": "string" }
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "nameA",
+      "value": "Postman Alpha",
+      "type": "string"
+    },
+    {
+      "key": "emailA",
+      "value": "postman.alpha@example.com",
+      "type": "string"
+    },
+    {
+      "key": "passwordA",
+      "value": "password123",
+      "type": "string"
+    },
+    {
+      "key": "nameB",
+      "value": "Postman Beta",
+      "type": "string"
+    },
+    {
+      "key": "emailB",
+      "value": "postman.beta@example.com",
+      "type": "string"
+    },
+    {
+      "key": "passwordB",
+      "value": "password123",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "accessTokenB",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userIdB",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "targetUserId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "targetName",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "searchQuery",
+      "value": "Postman",
+      "type": "string"
+    },
+    {
+      "key": "publicRoomId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "roomId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "declineRoomId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "joinRoomId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "friendId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "friendRequestId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "declineRequestId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cancelRequestId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "invitationId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "declineInvitationId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "joinRequestId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "declineJoinRequestId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "attachmentUrl",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "attachmentRoomId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "attachmentFile",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "attachmentName",
+      "value": "hello.txt",
+      "type": "string"
+    },
+    {
+      "key": "attachmentData",
+      "value": "data:text/plain;base64,SGVsbG8gZnJvbSBQb3N0bWFuIQ==",
+      "type": "string"
+    }
   ],
   "item": [
     {
-      "name": "Auth",
+      "name": "Setup (A and B)",
+      "description": "Creates or logs in the two demo users, then verifies profiles and search. Run this folder first.",
       "item": [
         {
-          "name": "Register",
+          "name": "Register A",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const data = pm.response.json();",
-                  "if (pm.response.code === 201) {",
-                  "  pm.collectionVariables.set('accessToken', data.token);",
-                  "  pm.collectionVariables.set('userId', data.user.id);",
-                  "}",
-                  "pm.test('Returns an access token', () => pm.expect(data.token).to.be.a('string'));"
+                  "var data = pm.response.json();",
+                  "if (pm.response.code === 201 && data.user) pm.collectionVariables.set('userId', data.user.id);",
+                  "pm.test('A exists or was created', function () { pm.expect([201, 409]).to.include(pm.response.code); });"
                 ]
               }
             }
           ],
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"{{name}}\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"name\": \"{{nameA}}\",\n  \"email\": \"{{emailA}}\",\n  \"password\": \"{{passwordA}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/api/auth/register",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "auth", "register"]
-            }
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Accepts 201 on the first run and 409 when the demo account already exists. Login A runs next either way."
           }
         },
         {
-          "name": "Login",
+          "name": "Login A",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const data = pm.response.json();",
+                  "var data = pm.response.json();",
                   "if (pm.response.code === 200) {",
                   "  pm.collectionVariables.set('accessToken', data.token);",
                   "  pm.collectionVariables.set('userId', data.user.id);",
                   "}",
-                  "pm.test('Returns an access token', () => pm.expect(data.token).to.be.a('string'));"
+                  "pm.test('A is logged in', function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "pm.test('A token saved', function () { pm.expect(data.token).to.be.a('string'); });"
                 ]
               }
             }
           ],
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"email\": \"{{emailA}}\",\n  \"password\": \"{{passwordA}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/api/auth/login",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "auth", "login"]
-            }
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Saves A as the active user in {{accessToken}} and {{userId}}."
           }
         },
         {
-          "name": "Refresh",
+          "name": "Refresh (A)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const data = pm.response.json();",
+                  "var data = pm.response.json();",
                   "if (pm.response.code === 200) {",
                   "  pm.collectionVariables.set('accessToken', data.token);",
                   "  pm.collectionVariables.set('userId', data.user.id);",
                   "}",
-                  "pm.test('Rotates the refresh cookie', () => pm.expect(pm.response.code).to.eql(200));"
+                  "pm.test('Rotates the refresh cookie', function () { pm.expect(pm.response.code).to.eql(200); });"
                 ]
               }
             }
           ],
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/auth/refresh",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "auth", "refresh"]
-            }
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Needs the httpOnly cookie from Login A. Keep \"Send cookies\" enabled."
           }
         },
         {
-          "name": "Me",
+          "name": "Register B",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const data = pm.response.json();",
-                  "pm.test('Returns the current user', () => pm.expect(data.user.id).to.be.a('string'));"
+                  "var data = pm.response.json();",
+                  "if (pm.response.code === 201 && data.user) pm.collectionVariables.set('userIdB', data.user.id);",
+                  "pm.test('B exists or was created', function () { pm.expect([201, 409]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{nameB}}\",\n  \"email\": \"{{emailB}}\",\n  \"password\": \"{{passwordB}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Login B",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('accessTokenB', data.token);",
+                  "  pm.collectionVariables.set('userIdB', data.user.id);",
+                  "  pm.collectionVariables.set('targetUserId', data.user.id);",
+                  "  pm.collectionVariables.set('targetName', data.user.name);",
+                  "}",
+                  "pm.test('B is logged in', function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "pm.test('B token saved', function () { pm.expect(data.token).to.be.a('string'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{emailB}}\",\n  \"password\": \"{{passwordB}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Saves B in {{accessTokenB}} and {{userIdB}}. Requests that act as B already use that token."
+          }
+        },
+        {
+          "name": "Me (auth)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Returns the active user', function () { pm.expect(data.user.id).to.eql(pm.collectionVariables.get('userId')); });"
                 ]
               }
             }
@@ -173,11 +476,1472 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/auth/me",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "auth", "me"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
             }
           }
         },
+        {
+          "name": "Me (profile)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Returns the extended profile', function () { pm.expect(data.user.avatarColor).to.be.a('string'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Updates the profile', function () { pm.expect(data.user.statusText).to.eql('Deep focus'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{nameA}}\",\n  \"bio\": \"Studying for finals\",\n  \"statusText\": \"Deep focus\",\n  \"avatarColor\": \"#394a39\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Search users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Returns a users array', function () { pm.expect(data.users).to.be.an('array'); });",
+                  "var target = (data.users || []).find(function (user) { return user.id === pm.collectionVariables.get('userIdB'); });",
+                  "if (target) {",
+                  "  pm.collectionVariables.set('targetUserId', target.id);",
+                  "  pm.collectionVariables.set('targetName', target.name);",
+                  "}",
+                  "pm.test('Finds B', function () { pm.expect(target).to.be.an('object'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/search?q={{searchQuery}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{searchQuery}}"
+                }
+              ]
+            },
+            "description": "Finds the second demo user and stores {{targetUserId}}. Search defaults to \"Postman\"."
+          }
+        },
+        {
+          "name": "Get user profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Returns the requested profile', function () { pm.expect(data.user.id).to.eql(pm.collectionVariables.get('targetUserId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{targetUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{targetUserId}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Friends",
+      "description": "Runs the full friend lifecycle across A and B: request, accept, list, remove, decline, and cancel.",
+      "item": [
+        {
+          "name": "Remove friend (clean start)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('friendId', '');",
+                  "pm.test('Friend removed or was not a friend', function () { pm.expect([200, 404]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/friends/{{targetUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "friends",
+                "{{targetUserId}}"
+              ]
+            },
+            "description": "Optional cleanup: returns 404 when A and B are not friends yet. This makes reruns safe."
+          }
+        },
+        {
+          "name": "Send friend request (A to B)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (pm.response.code === 201 && data.request) pm.collectionVariables.set('friendRequestId', data.request.id);",
+                  "pm.test('Request sent or already pending', function () { pm.expect([201, 409]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{targetUserId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/friends/requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "friends",
+                "requests"
+              ]
+            },
+            "description": "Act as A. B is taken from {{targetUserId}}."
+          }
+        },
+        {
+          "name": "List friend requests (B)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Returns incoming and outgoing', function () {",
+                  "  pm.expect(data.incoming).to.be.an('array');",
+                  "  pm.expect(data.outgoing).to.be.an('array');",
+                  "});",
+                  "if (data.incoming && data.incoming.length) {",
+                  "  pm.collectionVariables.set('friendRequestId', data.incoming[0].id);",
+                  "}",
+                  "pm.test('B sees A in incoming requests', function () {",
+                  "  var fromA = (data.incoming || []).some(function (request) { return request.user.id === pm.collectionVariables.get('userId'); });",
+                  "  pm.expect(fromA).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessTokenB}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/friends/requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "friends",
+                "requests"
+              ]
+            },
+            "description": "Runs as B ({{accessTokenB}}), so A appears under incoming."
+          }
+        },
+        {
+          "name": "Accept friend request (B)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (data.friend && data.friend.id) pm.collectionVariables.set('friendId', data.friend.id);",
+                  "pm.test('Accepts the request', function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "pm.test('Returns the new friend', function () { pm.expect(data.friend.id).to.be.a('string'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessTokenB}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/friends/requests/{{friendRequestId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "friends",
+                "requests",
+                "{{friendRequestId}}",
+                "accept"
+              ]
+            }
+          }
+        },
+        {
+          "name": "List friends (A)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Returns friends', function () { pm.expect(data.friends).to.be.an('array'); });",
+                  "var friend = (data.friends || []).find(function (user) { return user.id === pm.collectionVariables.get('targetUserId'); });",
+                  "if (friend) pm.collectionVariables.set('friendId', friend.id);",
+                  "pm.test('B is in the friend list', function () { pm.expect(friend).to.be.an('object'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/friends",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "friends"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Remove friend (before decline tests)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Removes the friend', function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "pm.collectionVariables.set('friendId', '');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/friends/{{friendId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "friends",
+                "{{friendId}}"
+              ]
+            },
+            "description": "Needed so B can send a fresh request that A declines/cancels."
+          }
+        },
+        {
+          "name": "Send friend request (B to A)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (pm.response.code === 201 && data.request) pm.collectionVariables.set('declineRequestId', data.request.id);",
+                  "pm.test('Creates a request', function () { pm.expect(pm.response.code).to.eql(201); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessTokenB}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/friends/requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "friends",
+                "requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "List friend requests (A)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Returns incoming and outgoing', function () {",
+                  "  pm.expect(data.incoming).to.be.an('array');",
+                  "  pm.expect(data.outgoing).to.be.an('array');",
+                  "});",
+                  "var fromB = (data.incoming || []).find(function (request) { return request.user.id === pm.collectionVariables.get('userIdB'); });",
+                  "if (fromB) pm.collectionVariables.set('declineRequestId', fromB.id);",
+                  "pm.test('A sees B in incoming requests', function () { pm.expect(fromB).to.be.an('object'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/friends/requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "friends",
+                "requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Decline friend request (A)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Declines the request', function () { pm.expect(pm.response.code).to.eql(200); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/friends/requests/{{declineRequestId}}/decline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "friends",
+                "requests",
+                "{{declineRequestId}}",
+                "decline"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Send friend request again (B to A)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (pm.response.code === 201 && data.request) pm.collectionVariables.set('cancelRequestId', data.request.id);",
+                  "pm.test('Creates a request', function () { pm.expect(pm.response.code).to.eql(201); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessTokenB}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/friends/requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "friends",
+                "requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cancel sent friend request (B)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cancels the request', function () { pm.expect(pm.response.code).to.eql(200); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessTokenB}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/friends/requests/{{cancelRequestId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "friends",
+                "requests",
+                "{{cancelRequestId}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rooms and Invitations",
+      "description": "Creates a public room (B joins), an invite-only room (B is invited and accepts), and a second invite-only room (B declines).",
+      "item": [
+        {
+          "name": "List rooms",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Returns a rooms array', function () { pm.expect(data.rooms).to.be.an('array'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create public room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (data.room && data.room.id) pm.collectionVariables.set('publicRoomId', data.room.id);",
+                  "pm.test('Creates a public room', function () { pm.expect(data.room.visibility).to.eql('public'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Open study room\",\n  \"description\": \"Anyone can join\",\n  \"subject\": \"General\",\n  \"visibility\": \"public\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get public room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Returns the public room', function () { pm.expect(data.room.id).to.eql(pm.collectionVariables.get('publicRoomId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/{{publicRoomId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "{{publicRoomId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Join public room (B)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('B joins the public room', function () { pm.expect(data.room.isMember).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessTokenB}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/{{publicRoomId}}/join",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "{{publicRoomId}}",
+                "join"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create invite-only room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (data.room && data.room.id) pm.collectionVariables.set('roomId', data.room.id);",
+                  "pm.test('Creates an invite-only room', function () { pm.expect(data.room.visibility).to.eql('invite'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Invite-only study room\",\n  \"description\": \"Approval or invitation required\",\n  \"subject\": \"General\",\n  \"visibility\": \"invite\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Invite B to invite-only room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (data.invitation && data.invitation.id) pm.collectionVariables.set('invitationId', data.invitation.id);",
+                  "pm.test('Creates an invitation', function () { pm.expect(pm.response.code).to.eql(201); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{targetUserId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/{{roomId}}/invitations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "{{roomId}}",
+                "invitations"
+              ]
+            },
+            "description": "Room creator A invites B."
+          }
+        },
+        {
+          "name": "List my room invitations (B)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Returns invitations', function () { pm.expect(data.invitations).to.be.an('array'); });",
+                  "var invite = (data.invitations || []).find(function (entry) {",
+                  "  return entry.room && entry.room.id === pm.collectionVariables.get('roomId');",
+                  "});",
+                  "if (invite) pm.collectionVariables.set('invitationId', invite.id);",
+                  "pm.test('Has the invitation for the new room', function () { pm.expect(invite).to.be.an('object'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessTokenB}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/invitations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "invitations"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Accept room invitation (B)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Accepts the invitation', function () { pm.expect(data.room.isMember).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessTokenB}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/invitations/{{invitationId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "invitations",
+                "{{invitationId}}",
+                "accept"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create invite-only room for decline",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (data.room && data.room.id) pm.collectionVariables.set('declineRoomId', data.room.id);",
+                  "pm.test('Creates the room', function () { pm.expect(pm.response.code).to.eql(201); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Declined invite room\",\n  \"description\": \"Used to test declining an invitation\",\n  \"subject\": \"General\",\n  \"visibility\": \"invite\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Invite B to decline room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (data.invitation && data.invitation.id) pm.collectionVariables.set('declineInvitationId', data.invitation.id);",
+                  "pm.test('Creates an invitation', function () { pm.expect(pm.response.code).to.eql(201); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{targetUserId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/{{declineRoomId}}/invitations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "{{declineRoomId}}",
+                "invitations"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Decline room invitation (B)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Declines the invitation', function () { pm.expect(pm.response.code).to.eql(200); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessTokenB}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/invitations/{{declineInvitationId}}/decline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "invitations",
+                "{{declineInvitationId}}",
+                "decline"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Join Requests",
+      "description": "B asks to join a room A owns. A lists and accepts one request, then declines another.",
+      "item": [
+        {
+          "name": "Create join-request room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (data.room && data.room.id) pm.collectionVariables.set('joinRoomId', data.room.id);",
+                  "pm.test('Creates the room', function () { pm.expect(pm.response.code).to.eql(201); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Join request room\",\n  \"description\": \"B asks to join here\",\n  \"subject\": \"General\",\n  \"visibility\": \"invite\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Ask to join room (B)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (data.request && data.request.id) pm.collectionVariables.set('joinRequestId', data.request.id);",
+                  "pm.test('Creates a join request', function () { pm.expect(pm.response.code).to.eql(201); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessTokenB}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Hi! I'd love to join and study with you.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/{{joinRoomId}}/join-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "{{joinRoomId}}",
+                "join-requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "List all join requests for my rooms (A)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Returns join requests', function () { pm.expect(data.requests).to.be.an('array'); });",
+                  "var mine = (data.requests || []).find(function (request) { return request.room && request.room.id === pm.collectionVariables.get('joinRoomId'); });",
+                  "if (mine) pm.collectionVariables.set('joinRequestId', mine.id);",
+                  "pm.test('Includes the new request', function () { pm.expect(mine).to.be.an('object'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/join-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "join-requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "List join requests for one room (A)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Returns join requests', function () { pm.expect(data.requests).to.be.an('array'); });",
+                  "if (data.requests && data.requests.length) pm.collectionVariables.set('joinRequestId', data.requests[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/{{joinRoomId}}/join-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "{{joinRoomId}}",
+                "join-requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Accept join request (A)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "pm.test('Accepts the join request', function () { pm.expect(data.request.status).to.eql('accepted'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/{{joinRoomId}}/join-requests/{{joinRequestId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "{{joinRoomId}}",
+                "join-requests",
+                "{{joinRequestId}}",
+                "accept"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Ask to join decline room (B)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (data.request && data.request.id) pm.collectionVariables.set('declineJoinRequestId', data.request.id);",
+                  "pm.test('Creates a join request', function () { pm.expect(pm.response.code).to.eql(201); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessTokenB}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Could I join this one instead?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/{{declineRoomId}}/join-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "{{declineRoomId}}",
+                "join-requests"
+              ]
+            },
+            "description": "B declined this room invitation earlier, so B can ask to join instead."
+          }
+        },
+        {
+          "name": "Decline join request (A)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Declines the join request', function () { pm.expect(pm.response.code).to.eql(200); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/{{declineRoomId}}/join-requests/{{declineJoinRequestId}}/decline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "{{declineRoomId}}",
+                "join-requests",
+                "{{declineJoinRequestId}}",
+                "decline"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Attachments",
+      "description": "Uploads a base64 data URL as a room member, then downloads it through nginx.",
+      "item": [
+        {
+          "name": "Upload attachment (A)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "if (data.attachment && data.attachment.url) {",
+                  "  var parts = data.attachment.url.split('/').filter(Boolean);",
+                  "  pm.collectionVariables.set('attachmentUrl', data.attachment.url);",
+                  "  pm.collectionVariables.set('attachmentFile', parts.pop());",
+                  "  pm.collectionVariables.set('attachmentRoomId', parts.pop());",
+                  "}",
+                  "pm.test('Uploads an attachment', function () { pm.expect(pm.response.code).to.eql(201); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{attachmentName}}\",\n  \"type\": \"text/plain\",\n  \"data\": \"{{attachmentData}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms/{{publicRoomId}}/attachments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "rooms",
+                "{{publicRoomId}}",
+                "attachments"
+              ]
+            },
+            "description": "A is the public room creator, so A can upload. Change attachmentName/attachmentData for other files."
+          }
+        },
+        {
+          "name": "Download uploaded attachment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns the file', function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "pm.test('Content matches the upload', function () { pm.expect(pm.response.text()).to.eql('Hello from Postman!'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/uploads/{{attachmentRoomId}}/{{attachmentFile}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "uploads",
+                "{{attachmentRoomId}}",
+                "{{attachmentFile}}"
+              ]
+            },
+            "description": "Uses the URL returned by Upload attachment. Static files do not need a bearer token."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Session",
+      "description": "Clears the demo session. Run this last, or skip it if you want to keep using the saved tokens.",
+      "item": [
         {
           "name": "Logout",
           "event": [
@@ -188,105 +1952,29 @@
                 "exec": [
                   "pm.collectionVariables.set('accessToken', '');",
                   "pm.collectionVariables.set('userId', '');",
-                  "pm.test('Revokes the session', () => pm.expect(pm.response.code).to.eql(200));"
+                  "pm.collectionVariables.set('accessTokenB', '');",
+                  "pm.collectionVariables.set('userIdB', '');",
+                  "pm.test('Revokes the session', function () { pm.expect(pm.response.code).to.eql(200); });"
                 ]
               }
             }
           ],
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/auth/logout",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "auth", "logout"]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Rooms",
-      "item": [
-        {
-          "name": "List rooms",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const data = pm.response.json();",
-                  "pm.test('Returns a rooms array', () => pm.expect(data.rooms).to.be.an('array'));",
-                  "if (data.rooms && data.rooms.length) pm.collectionVariables.set('roomId', data.rooms[0].id);"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/rooms",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "rooms"]
-            }
-          }
-        },
-        {
-          "name": "Create room",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const data = pm.response.json();",
-                  "if (pm.response.code === 201) pm.collectionVariables.set('roomId', data.room.id);",
-                  "pm.test('Creates a room', () => pm.expect(pm.response.code).to.eql(201));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Algorithms deep work\",\n  \"description\": \"Two hours of focused practice\",\n  \"subject\": \"Computer Science\"\n}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/rooms",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "rooms"]
-            }
-          }
-        },
-        {
-          "name": "Join room",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const data = pm.response.json();",
-                  "pm.test('Joins the room', () => pm.expect(data.room.members).to.be.an('array'));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/rooms/{{roomId}}/join",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "rooms", "{{roomId}}", "join"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
             }
           }
         }

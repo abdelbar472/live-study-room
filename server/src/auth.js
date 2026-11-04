@@ -41,7 +41,7 @@ export const rotateRefreshToken = async (rawToken) => {
   );
   if (!claimed) return { status: 'invalid' };
 
-  const user = await User.findById(stored.user).select('_id name email');
+  const user = await User.findById(stored.user).select('_id name email bio statusText avatarColor');
   if (!user) return { status: 'invalid' };
 
   const next = await issueRefreshToken(user, stored.family);
@@ -61,7 +61,7 @@ export const authenticate = async (req, res, next) => {
     if (!header?.startsWith('Bearer ')) return res.status(401).json({ message: 'Authentication required' });
     const payload = jwt.verify(header.slice(7), secret());
     if (payload.type !== 'access') throw new Error('Wrong token type');
-    const user = await User.findById(payload.sub).select('_id name email');
+    const user = await User.findById(payload.sub).select('_id name email bio statusText avatarColor');
     if (!user) return res.status(401).json({ message: 'User no longer exists' });
     req.user = user;
     next();
@@ -75,7 +75,7 @@ export const authenticateSocket = async (socket, next) => {
     const token = socket.handshake.auth?.token;
     const payload = jwt.verify(token, secret());
     if (payload.type !== 'access') throw new Error('Wrong token type');
-    const user = await User.findById(payload.sub).select('_id name email');
+    const user = await User.findById(payload.sub).select('_id name email bio statusText avatarColor');
     if (!user) return next(new Error('Authentication required'));
     socket.user = user;
     next();

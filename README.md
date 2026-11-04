@@ -125,6 +125,7 @@ Copy `.env.example` → `.env`. Important variables:
 | `POST /api/auth/refresh` | Rotate refresh token; reuse of a revoked token invalidates the chain |
 | `POST /api/auth/logout` | Revoke chain + clear cookie |
 
+<<<<<<< HEAD
 - Access token: `Authorization: Bearer <token>` (REST + Socket.IO `auth.token`).
 - Refresh cookie: `httpOnly`, path `/api/auth`.
 
@@ -163,3 +164,69 @@ live-study-room/
 ## License
 
 MIT © Khaled Abdelbar — see [LICENSE](LICENSE).
+=======
+A ready-to-use Postman collection is in [`postman/`](postman/README.md).
+
+## Features and API
+
+All routes below require `Authorization: Bearer <access token>` unless noted.
+
+### Profiles
+
+- `GET /api/auth/me` and `GET /api/users/:id` return the extended profile
+  (`bio`, `statusText`, `avatarColor`, online flag).
+- `PATCH /api/users/me` updates `name`, `bio`, `statusText`, and `avatarColor`.
+- `GET /api/users/search?q=...` searches people by name or email and reports the
+  relationship (`none`, `incoming`, `outgoing`, `friend`).
+
+### Friends
+
+- `GET /api/friends` lists accepted friends with live online status.
+- `GET /api/friends/requests` returns incoming and outgoing requests.
+- `POST /api/friends/requests` with `{ "userId": "..." }` sends a request.
+- `POST /api/friends/requests/:id/accept|decline` responds to a request.
+- `DELETE /api/friends/requests/:id` cancels an outgoing request.
+- `DELETE /api/friends/:userId` removes a friend.
+
+A unique pair key in MongoDB means two people can never end up with duplicate or
+reversed friendship documents.
+
+### Rooms
+
+- `GET /api/rooms` lists rooms with `visibility`, `isMember`, `isOwner`,
+  `invited`, `myRequestStatus`, and (for creators) `pendingRequests`.
+- `POST /api/rooms` accepts `name`, `description`, `subject`, and
+  `visibility` (`public` or `invite`).
+- `POST /api/rooms/:id/join` joins a public room. For an invite-only room it
+  only succeeds with a pending invitation.
+- `POST /api/rooms/:id/join-requests` lets a user ask the creator to join an
+  invite-only room. The body may include `{ "message": "..." }`.
+- `GET /api/rooms/join-requests` and
+  `GET /api/rooms/:id/join-requests` let a creator see pending requests.
+- `POST /api/rooms/:id/join-requests/:requestId/accept|decline` responds.
+- `POST /api/rooms/:id/invitations` (creator only) invites `{ "userId": "..." }`.
+- `GET /api/rooms/invitations` lists the current user's pending room invitations.
+- `POST /api/rooms/invitations/:id/accept|decline` responds to an invitation.
+
+### Socket.IO
+
+- Rooms use `room:join` / `room:leave` and receive `presence:update` with the
+  people currently in that room.
+- `presence:online` broadcasts `{ userIds, count }` whenever anyone connects or
+  disconnects, which powers the friends list's live online dots.
+- `chat:send` accepts `{ roomId, text, attachment }`; members receive
+  `chat:message`.
+- Personal notification events: `friends:updated`, `room:invitations:updated`,
+  `room:requests:updated`, `rooms:updated`, and `notification` (for toasts).
+
+### Attachments
+
+- `POST /api/rooms/:id/attachments` accepts a JSON base64 data URL
+  (`{ name, type, data }`) from a room member. Files are capped at 5 MB and a
+  safe MIME allowlist (images, PDF, text, Office documents, ZIP, MP3/MP4).
+- The response contains `{ name, type, size, url }`; the client then sends that
+  attachment with the chat message.
+- Files are stored in `server/uploads` locally and in the
+  `study-room-uploads` Docker volume in Compose. Images render inline; other
+  file types are served as downloads.
+>>>>>>> 364b32c ( add some social)
